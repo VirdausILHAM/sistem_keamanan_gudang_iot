@@ -1,0 +1,110 @@
+#include <WiFi.h>
+
+// ==========================================
+// 1. KONFIGURASI WIFI (WAJIB TERKONEKSI)
+// ==========================================
+const char* ssid     = "LabIoTUNISA"; // Nama WiFi / Hotspot yang digunakan
+const char* password = "12345678";    // Password WiFi
+
+// ==========================================
+// 2. DEFINISI PIN SENSOR
+// ==========================================
+#define TRIG_PIN 5     // Pin Trig Ultrasonik -> GPIO 5 (D5)
+#define ECHO_PIN 18    // Pin Echo Ultrasonik -> GPIO 18 (D18)
+#define MQ_PIN   32    // Pin Analog (AO) Sensor Gas MQ -> GPIO 32 (D32)
+
+// ==========================================
+// 3. VARIABEL & BATAS AMBANG (THRESHOLD)
+// ==========================================
+float jarakCm = 0.0;
+int nilaiGas  = 0;
+
+const float BATAS_JARAK_PINTU = 15.0; // Objek terdeteksi jika jarak <= 15 cm
+const int   BATAS_GAS_BAHAYA  = 1500; // Peringatan gas/asap jika nilai > 1500 (skala 0-4095)
+
+// ==========================================
+// 4. FUNGSI PEMBACAAN SENSOR ULTRASONIK
+// ==========================================
+float bacaJarak() {
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  long durasi = pulseIn(ECHO_PIN, HIGH, 30000); // Timeout 30ms agar tidak hang
+  if (durasi == 0) return 999.0;               // Jika tidak ada pantulan objek
+  
+  return (durasi * 0.034) / 2.0;               // Konversi durasi ke satuan cm
+}
+
+// ==========================================
+// 5. FUNGSI KONEKSI WIFI WAJIB
+// ==========================================
+void hubungkanWiFi() {
+  Serial.println("\n==========================================");
+  Serial.print("Menghubungkan ke WiFi: ");
+  Serial.println(ssid);
+
+  WiFi.mode(WIFI_STA); // Atur ESP32 sebagai Station (Client WiFi)
+  WiFi.begin(ssid, password);
+
+  // Terus menunggu hingga ESP32 berhasil terkoneksi ke WiFi
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  Serial.println("\n[SUKSES] ESP32 Terhubung ke WiFi!");
+  Serial.print("IP Address ESP32 : ");
+  Serial.println(WiFi.localIP());
+  Serial.print("Kekuatan Sinyal  : ");
+  Serial.print(WiFi.RSSI());
+  Serial.println(" dBm");
+  Serial.println("==========================================\n");
+}
+
+// ==========================================
+// 6. SETUP (DIJALANKAN SEKALI SAAT NYALA)
+// ==========================================
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // Konfigurasi mode pin sensor
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(MQ_PIN, INPUT);
+
+  // Jalankan koneksi WiFi wajib sebelum memulai sistem
+  hubungkanWiFi();
+}
+
+// ==========================================
+// 7. LOOP (DIJALANKAN TERUS-MENERUS)
+// ==========================================
+void loop() {
+  // Pastikan koneksi WiFi tetap terjaga; jika terputus, otomatis hubungkan ulang
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("[PERINGATAN] Koneksi WiFi terputus! Menghubungkan ulang...");
+    hubungkanWiFi();
+  }
+
+  // 1. Baca data dari kedua sensor
+  jarakCm  = bacaJarak();
+  nilaiGas = analogRead(MQ_PIN); // Membaca nilai analog kadar gas/asap (0 - 4095)
+
+  // 2. Pemrosesan logika sistem keamanan pintu & udara gudang
+  String statusPintu = (jarakCm <= BATAS_JARAK_PINTU) ? "ADA OBJEK MENDEKAT!" : "AMAN (Kosong)";
+  String statusUdara = (nilaiGas > BATAS_GAS_BAHAYA)  ? "BAHAYA GAS / ASAP!"  : "UDARA NORMAL";
+
+  // 3. Tampilkan status WiFi & hasil sensor ke Serial Monitor
+  Serial.println("=== MONITORING KEAMANAN & UDARA GUDANG ===");
+  Serial.printf("WiFi Status   -> TERHUBUNG (IP: %s)\n", WiFi.localIP().toString().c_str());
+  Serial.printf("1. Ultrasonik -> Jarak : %.1f cm   | Status: %s\n", jarakCm, statusPintu.c_str());
+  Serial.printf("2. Sensor MQ  -> Kadar : %d / 4095 | Status: %s\n", nilaiGas, statusUdara.c_str());
+  Serial.println("==========================================\n");
+
+  delay(1000); // Pembacaan stabil setiap 1 detik
+}
